@@ -42,6 +42,7 @@ public:
 
     bool init(const std::string &uri, std::shared_ptr<WebSocketDelegate>  delegate, const std::vector<std::string> &protocols, const std::string &caFile);
     void close();
+    void closeAsync();
     void send(const char *data, size_t len);
     void send(const std::string &msg);
 

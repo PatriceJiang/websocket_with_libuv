@@ -24,8 +24,7 @@ int main(int argc, char **argv)
     WebSocket *ws = new WebSocket();
     ws->init("", std::make_shared<WSDelegate>(), std::vector<std::string>(), "");
 
-    
-    
-    std::this_thread::sleep_for(std::chrono::seconds(200));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    ws->close();
     return 0;
 }

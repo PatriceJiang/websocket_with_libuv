@@ -235,7 +235,7 @@ lws_context_creation_info Helper::initCtxCreateInfo(const struct lws_protocols *
 void Helper::send(const std::string &event, const NetCmd &cmd)
 {
     NetCmd _copy(cmd);
-    _netThread->send(event, _copy);
+    _netThread->emit(event, _copy);
 }
 
 void Helper::before()
@@ -523,7 +523,7 @@ void WebSocketImpl::doWrite(NetDataPack &pack)
         //error 
         sigCloseAsync();
     }
-    else if (bytesWrite < frameSize)
+    else 
     {
         pack.consume(bytesWrite);
     }
