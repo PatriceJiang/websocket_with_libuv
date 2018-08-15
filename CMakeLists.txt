@@ -28,6 +28,7 @@ link_directories(${SSL_ROOT}/prebuilt/win32)
 link_directories(${WS_ROOT}/prebuilt/win32)
 #link_directories(${UV_ROOT}/build/Debug)
 link_directories(${UV_ROOT}/prebuilt/win32)
+link_directories("E:/Github/zlib-1.2.11/build/Debug")
 
 add_executable(hello ${LOOP_SRC} ${CURR_SRC})
 
@@ -41,4 +42,10 @@ target_link_libraries(hello
   libssl
   libcrypto
   websockets
+  zlibstaticd
 )
+
+add_custom_command(TARGET hello POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${PROJECT_SOURCE_DIR}/bin"
+        $<TARGET_FILE_DIR:hello>)

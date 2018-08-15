@@ -16,9 +16,9 @@ bool WebSocket::init(const std::string &uri, WebSocketDelegate::Ptr delegate, co
 
 void WebSocket::close() { impl->sigClose(); }
 
-void WebSocket::send(const std::string &msg) { impl->sigSend(msg); }
+void WebSocket::emit(const std::string &msg) { impl->sigSend(msg); }
 
-void WebSocket::send(const char *data, size_t len) { impl->sigSend(data, len); }
+void WebSocket::emit(const char *data, size_t len) { impl->sigSend(data, len); }
 
 
 //////////////default delegate impl///////////////

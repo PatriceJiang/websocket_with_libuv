@@ -112,11 +112,11 @@ public:
     
     void init();
 
+    void emit(const std::string &event, const NetCmd &cmd);
+
     void before() override;
     void after() override;
     void update(int dtms) override;
-
-    void send(NetCmd cmd);
 
     void runInUI(const std::function<void()> &fn);
 
@@ -124,40 +124,41 @@ public:
     void handleCmdDisconnect(NetCmd &cmd);
     void handleCmdWrite(NetCmd &cmd);
 
-    uv_loop_t * getLoop() { return netThread->getUVLoop(); }
+    uv_loop_t * getLoop() { return _netThread->getUVLoop(); }
     void updateLibUV();
 private:
-    static std::shared_ptr<Helper> sInstance;
-    static std::mutex sInstanceMutex;
-
-    Looper<NetCmd> *netThread{nullptr};
-
     //libwebsocket helper
     void initProtocols();
     lws_context_creation_info initCtxCreateInfo(const struct lws_protocols *protocols, bool useSSL);
 
+private:
+    static std::shared_ptr<Helper> __sInstance;
+    static std::mutex __sInstanceMutex;
 
+    Looper<NetCmd> *_netThread{nullptr};
+    
+public:
     //libwebsocket fields
-    lws_context *lwsContext{nullptr};
-    lws_protocols *lwsDefaultProtocols{ nullptr };
+    lws_protocols * lwsDefaultProtocols{ nullptr };
+    lws_context *lwsContext{ nullptr };
 
-    friend class WebSocketImpl;
+    //friend class WebSocketImpl;
 };
 
 //static fields
-std::shared_ptr<Helper> Helper::sInstance;
-std::mutex Helper::sInstanceMutex;
+std::shared_ptr<Helper> Helper::__sInstance;
+std::mutex Helper::__sInstanceMutex;
 
 Helper::Helper()
 {
-    netThread = new Looper<NetCmd>(ThreadCategory::NET_THREAD, shared_from_this(), 1000);
+    _netThread = new Looper<NetCmd>(ThreadCategory::NET_THREAD, shared_from_this(), 1000);
 }
 
 Helper::~Helper()
 {
-    if (netThread) {
-        netThread->syncStop();
-        netThread = nullptr;
+    if (_netThread) {
+        _netThread->syncStop();
+        _netThread = nullptr;
     }
     if (lwsContext)
     {
@@ -173,12 +174,12 @@ Helper::~Helper()
 
 std::shared_ptr<Helper> Helper::getInstance()
 {
-    std::lock_guard<std::mutex> guard(sInstanceMutex);
-    if (!sInstance) {
-        sInstance = std::make_shared<Helper>();
-        sInstance->init();
+    std::lock_guard<std::mutex> guard(__sInstanceMutex);
+    if (!__sInstance) {
+        __sInstance = std::make_shared<Helper>();
+        __sInstance->init();
     }
-    return sInstance;
+    return __sInstance;
 }
 
 void Helper::init()
@@ -187,11 +188,11 @@ void Helper::init()
     lws_context_creation_info  info = initCtxCreateInfo(lwsDefaultProtocols, true);
     lwsContext = lws_create_context(&info);
 
-    netThread->on("connect", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
-    netThread->on("send", [this](NetCmd &ev) {this->handleCmdWrite(ev); });
-    netThread->on("close", [this](NetCmd& ev) {this->handleCmdDisconnect(ev); });
+    _netThread->on("connect", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
+    _netThread->on("send", [this](NetCmd &ev) {this->handleCmdWrite(ev); });
+    _netThread->on("close", [this](NetCmd& ev) {this->handleCmdDisconnect(ev); });
 
-    netThread->run();
+    _netThread->run();
 }
 
 void Helper::initProtocols()
@@ -227,6 +228,11 @@ lws_context_creation_info Helper::initCtxCreateInfo(const struct lws_protocols *
     return info;
 }
 
+void Helper::emit(const std::string &event, const NetCmd &cmd)
+{
+    NetCmd _copy(cmd);
+    _netThread->emit(event, _copy);
+}
 
 void Helper::before()
 {
@@ -241,6 +247,12 @@ void Helper::update(int dtms)
 void Helper::after()
 {
 
+}
+
+void Helper::runInUI(const std::function<void()> &fn)
+{
+    //TODO dispatch to main thread
+    fn();
 }
 
 void Helper::handleCmdConnect(NetCmd &cmd)
@@ -336,21 +348,19 @@ bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate
         }
     }
 
-    Helper::getInstance()->send(NetCmd::Open(this));
+    Helper::getInstance()->emit("open", NetCmd::Open(this));
 
     return true;
 }
 
 void WebSocketImpl::sigClose()
 {
-    NetCmd cmd = NetCmd::Close(this);
-    Helper::getInstance()->netThread->emit("close", cmd);
+    Helper::getInstance()->emit("close", NetCmd::Close(this));
 }
 
 void WebSocketImpl::sigCloseAsync()
 {
-    NetCmd cmd = NetCmd::Close(this);
-    Helper::getInstance()->netThread->emit("close", cmd);
+    Helper::getInstance()->emit("close", NetCmd::Close(this));
     //sleep forever
     while (_state != WebSocket::State::CLOSED)
     {
@@ -360,14 +370,13 @@ void WebSocketImpl::sigCloseAsync()
 
 void WebSocketImpl::sigSend(const char *data, size_t len)
 {
-    NetCmd cmd = NetCmd::Write(this, data, len, true);
-    Helper::getInstance()->netThread->emit("send", cmd);
+    Helper::getInstance()->emit("send", NetCmd::Write(this, data, len, true));
 }
 
 void WebSocketImpl::sigSend(const std::string &msg)
 {
     NetCmd cmd = NetCmd::Write(this, msg.data(), msg.length(), false);
-    Helper::getInstance()->netThread->emit("send", cmd);
+    Helper::getInstance()->emit("send", cmd);
 }
 
 int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, ssize_t len)
@@ -545,7 +554,13 @@ int WebSocketImpl::netOnClosed()
     });
 
     //remove from cache
-    WebSocketImpl::_cachedSocketes.erase(_wsId);
+    _cachedSocketes.erase(_wsId);
+
+    if (_cachedSocketes.size() == 0)
+    {
+        //no active websocket, quit netThread
+        Helper::getInstance().reset(); 
+    }
 
     return 0;
 }
