@@ -3,36 +3,29 @@
 #include <iostream>
 #include <chrono>
 #include <ctime>
-#include "Looper.h"
 
-class SimpleLoop :public Loop
+#include <vector>
+#include <memory>
+#include <thread>
+
+#include "WebSocket.h"
+
+class WSDelegate : public WebSocketDelegate
 {
 public:
-    void before() {
-        std::cout << "before" << std::endl;
-    }
-    void after()
-    {
-        std::cout << "after" << std::endl;
-    }
-    void update(int dtms)
-    {
-        auto now = time(nullptr);
-        std::cout << "update " << now << std::endl;
+    virtual void onConnected(WebSocket &so) override {
+        std::cout << "[WSDelegate] " << "onConnnected!~" << std::endl;
+        so.send("hello plutoo");
     }
 };
 
 int main(int argc, char **argv)
 {
- 
-    std::shared_ptr<Loop> tsk(new SimpleLoop);
+    WebSocket *ws = new WebSocket();
+    ws->init("", std::make_shared<WSDelegate>(), std::vector<std::string>(), "");
 
-    {
-        auto loop = std::make_shared<Looper<std::string> >(ThreadCategory::NET_THREAD, tsk, 1000LL);
-        loop->run();
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(200000));
-
+    
+    
+    std::this_thread::sleep_for(std::chrono::seconds(200));
     return 0;
 }

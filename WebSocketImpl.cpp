@@ -112,7 +112,7 @@ public:
     
     void init();
 
-    void emit(const std::string &event, const NetCmd &cmd);
+    void send(const std::string &event, const NetCmd &cmd);
 
     void before() override;
     void after() override;
@@ -124,7 +124,7 @@ public:
     void handleCmdDisconnect(NetCmd &cmd);
     void handleCmdWrite(NetCmd &cmd);
 
-    uv_loop_t * getLoop() { return _netThread->getUVLoop(); }
+    uv_loop_t * getUVLoop() { return _netThread->getUVLoop(); }
     void updateLibUV();
 private:
     //libwebsocket helper
@@ -135,12 +135,12 @@ private:
     static std::shared_ptr<Helper> __sInstance;
     static std::mutex __sInstanceMutex;
 
-    Looper<NetCmd> *_netThread{nullptr};
+    std::shared_ptr<Looper<NetCmd> > _netThread = nullptr;
     
 public:
     //libwebsocket fields
-    lws_protocols * lwsDefaultProtocols{ nullptr };
-    lws_context *lwsContext{ nullptr };
+    lws_protocols * _lwsDefaultProtocols = nullptr;
+    lws_context *_lwsContext = nullptr;
 
     //friend class WebSocketImpl;
 };
@@ -150,25 +150,23 @@ std::shared_ptr<Helper> Helper::__sInstance;
 std::mutex Helper::__sInstanceMutex;
 
 Helper::Helper()
-{
-    _netThread = new Looper<NetCmd>(ThreadCategory::NET_THREAD, shared_from_this(), 1000);
-}
+{}
 
 Helper::~Helper()
 {
     if (_netThread) {
-        _netThread->syncStop();
-        _netThread = nullptr;
+        _netThread->syncStop(); //use async?
+        _netThread.reset();
     }
-    if (lwsContext)
+    if (_lwsContext)
     {
-        lws_context_destroy(lwsContext);
-        lwsContext = nullptr;
+        lws_context_destroy(_lwsContext);
+        _lwsContext = nullptr;
     }
-    if (lwsDefaultProtocols)
+    if (_lwsDefaultProtocols)
     {
-        free(lwsDefaultProtocols);
-        lwsDefaultProtocols = nullptr;
+        free(_lwsDefaultProtocols);
+        _lwsDefaultProtocols = nullptr;
     }
 }
 
@@ -184,11 +182,13 @@ std::shared_ptr<Helper> Helper::getInstance()
 
 void Helper::init()
 {
-    initProtocols();
-    lws_context_creation_info  info = initCtxCreateInfo(lwsDefaultProtocols, true);
-    lwsContext = lws_create_context(&info);
+    _netThread = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, shared_from_this(), 200);
 
-    _netThread->on("connect", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
+    initProtocols();
+    lws_context_creation_info  info = initCtxCreateInfo(_lwsDefaultProtocols, false);
+    _lwsContext = lws_create_context(&info);
+
+    _netThread->on("open", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
     _netThread->on("send", [this](NetCmd &ev) {this->handleCmdWrite(ev); });
     _netThread->on("close", [this](NetCmd& ev) {this->handleCmdDisconnect(ev); });
 
@@ -197,9 +197,9 @@ void Helper::init()
 
 void Helper::initProtocols()
 {
-    if (!lwsDefaultProtocols) free(lwsDefaultProtocols); 
-    lwsDefaultProtocols = (lws_protocols *)calloc(2, sizeof(struct lws_protocols));
-    lws_protocols *p = &lwsDefaultProtocols[0];
+    if (!_lwsDefaultProtocols) free(_lwsDefaultProtocols); 
+    _lwsDefaultProtocols = (lws_protocols *)calloc(2, sizeof(struct lws_protocols));
+    lws_protocols *p = &_lwsDefaultProtocols[0];
     p->name = "";
     p->rx_buffer_size = WS_RX_BUFFER_SIZE;
     p->callback = (lws_callback_function*) &websocket_callback;
@@ -228,25 +228,26 @@ lws_context_creation_info Helper::initCtxCreateInfo(const struct lws_protocols *
     return info;
 }
 
-void Helper::emit(const std::string &event, const NetCmd &cmd)
+void Helper::send(const std::string &event, const NetCmd &cmd)
 {
     NetCmd _copy(cmd);
-    _netThread->emit(event, _copy);
+    _netThread->send(event, _copy);
 }
 
 void Helper::before()
 {
-    
+    std::cout << "[Helper] thread start ... " << std::endl;
+    updateLibUV();
 }
 
 void Helper::update(int dtms)
 {
-
+   // std::cout << "[Helper] thread tick ... " << std::endl;
 }
 
 void Helper::after()
 {
-
+    std::cout << "[Helper] thread quit!!! ... " << std::endl;
 }
 
 void Helper::runInUI(const std::function<void()> &fn)
@@ -275,7 +276,7 @@ void Helper::handleCmdWrite(NetCmd &cmd)
 
 void Helper::updateLibUV()
 {
-    lws_uv_initloop(Helper::getInstance()->lwsContext, Helper::getInstance()->getLoop(), 0);
+    lws_uv_initloop(Helper::getInstance()->_lwsContext, Helper::getInstance()->getUVLoop(), 0);
 }
 
 
@@ -299,7 +300,6 @@ WebSocketImpl::WebSocketImpl(WebSocket *t)
 {
     _ws = t;
     _wsId = _wsIdCounter.fetch_add(1);
-    _cachedSocketes.emplace(_wsId, shared_from_this());
 }
 
 WebSocketImpl::~WebSocketImpl()
@@ -322,6 +322,8 @@ WebSocketImpl::~WebSocketImpl()
 
 bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string & caFile)
 {
+    _cachedSocketes.emplace(_wsId, shared_from_this());
+
     this->_uri = uri;
     this->_delegate = delegate;
     this->_protocols = protocols;
@@ -348,19 +350,19 @@ bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate
         }
     }
 
-    Helper::getInstance()->emit("open", NetCmd::Open(this));
+    Helper::getInstance()->send("open", NetCmd::Open(this));
 
     return true;
 }
 
 void WebSocketImpl::sigClose()
 {
-    Helper::getInstance()->emit("close", NetCmd::Close(this));
+    Helper::getInstance()->send("close", NetCmd::Close(this));
 }
 
 void WebSocketImpl::sigCloseAsync()
 {
-    Helper::getInstance()->emit("close", NetCmd::Close(this));
+    Helper::getInstance()->send("close", NetCmd::Close(this));
     //sleep forever
     while (_state != WebSocket::State::CLOSED)
     {
@@ -370,13 +372,13 @@ void WebSocketImpl::sigCloseAsync()
 
 void WebSocketImpl::sigSend(const char *data, size_t len)
 {
-    Helper::getInstance()->emit("send", NetCmd::Write(this, data, len, true));
+    Helper::getInstance()->send("send", NetCmd::Write(this, data, len, true));
 }
 
 void WebSocketImpl::sigSend(const std::string &msg)
 {
     NetCmd cmd = NetCmd::Write(this, msg.data(), msg.length(), false);
-    Helper::getInstance()->emit("send", cmd);
+    Helper::getInstance()->send("send", cmd);
 }
 
 int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, ssize_t len)
@@ -409,7 +411,7 @@ int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason
     case LWS_CALLBACK_RAW_CLOSE:
     case LWS_CALLBACK_RAW_WRITEABLE:
     default:
-        lwsl_warn("lws callback reason %d is not handled!", reason);
+        lwsl_warn("lws callback reason %d is not handled!\n", reason);
         break;
     }
     return ret;
@@ -418,6 +420,9 @@ int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason
 
 void WebSocketImpl::doConnect()
 {
+    
+    assert(Helper::getInstance()->getUVLoop());
+
     struct lws_extension exts[] = {
         {
             "permessage-deflate",
@@ -432,12 +437,12 @@ void WebSocketImpl::doConnect()
     { nullptr,nullptr,nullptr }
     };
 
-    auto useSSL = true; //TODO calculate from url
+    auto useSSL = false; //TODO calculate from url
 
     lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
     info.port = CONTEXT_PORT_NO_LISTEN;
-    info.protocols = _lwsProtocols == nullptr ? Helper::getInstance()->lwsDefaultProtocols : _lwsProtocols;
+    info.protocols = _lwsProtocols == nullptr ? Helper::getInstance()->_lwsDefaultProtocols : _lwsProtocols;
     info.gid = -1;
     info.uid = -1;
     info.user = this;
@@ -457,7 +462,7 @@ void WebSocketImpl::doConnect()
         sslFlags |= LCCSCF_USE_SSL;
     }
 
-    _lwsHost = lws_create_vhost(Helper::getInstance()->lwsContext, &info);
+    _lwsHost = lws_create_vhost(Helper::getInstance()->_lwsContext, &info);
 
     if (useSSL)
     {
@@ -467,7 +472,7 @@ void WebSocketImpl::doConnect()
 
     struct lws_client_connect_info cinfo;
     memset(&cinfo, 0, sizeof(cinfo));
-    cinfo.context = Helper::getInstance()->lwsContext;
+    cinfo.context = Helper::getInstance()->_lwsContext;
     cinfo.address = "invoke.top";
     cinfo.port = 6789;
     cinfo.ssl_connection = sslFlags;
@@ -598,7 +603,7 @@ int WebSocketImpl::netOnWritable()
     //handle close
     if (_state == WebSocket::State::CLOSING)
     {
-        lwsl_warn("closing websocket");
+        lwsl_warn("closing websocket\n");
         return -1;
     }
 
