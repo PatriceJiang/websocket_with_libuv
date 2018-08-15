@@ -27,6 +27,14 @@ public:
         CLOSING,
         CLOSED
     };
+    
+    enum class ErrorCode
+    {
+        TIME_OUT,
+        CONNECTION_FAIURE,
+        LWS_ERROR,
+        UNKNOWN,
+    };
 
 public:
     WebSocket();
@@ -48,5 +56,5 @@ public:
     virtual void onConnected(WebSocket &ws);
     virtual void onDisconnected(WebSocket &ws);
     virtual void onError(WebSocket &ws, int errCode);
-    virtual void onData(WebSocket &ws, const WebSocket::Data &data);
+    virtual void onMesage(WebSocket &ws, const WebSocket::Data &data);
 };

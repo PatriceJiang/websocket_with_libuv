@@ -65,11 +65,12 @@ private:
 
 class NetCmd {
 public:
+    NetCmd() {}
     NetCmd(WebSocketImpl *ws, NetCmdType cmd, std::shared_ptr<NetDataPack> data) :ws(ws), cmd(cmd), data(data) {}
     NetCmd(const NetCmd &o) :ws(o.ws), cmd(o.cmd), data(o.data) {}
     static NetCmd Open(WebSocketImpl *ws);
     static NetCmd Close(WebSocketImpl *ws);
-    static NetCmd Write(WebSocketImpl *ws, const char *data, int len, bool isBinary);
+    static NetCmd Write(WebSocketImpl *ws, const char *data, size_t len, bool isBinary);
 public:
     WebSocketImpl *ws{nullptr};
     NetCmdType cmd;
@@ -78,10 +79,10 @@ public:
 
 NetCmd NetCmd::Open(WebSocketImpl *ws) { return NetCmd(ws, NetCmdType::OPEN, nullptr); }
 NetCmd NetCmd::Close(WebSocketImpl *ws) { return NetCmd(ws, NetCmdType::CLOSE, nullptr); }
-NetCmd NetCmd::Write(WebSocketImpl *ws, const char *data, int len, bool isBinary)
+NetCmd NetCmd::Write(WebSocketImpl *ws, const char *data, size_t len, bool isBinary)
 { 
     auto pack= std::make_shared<NetDataPack>(data, len, isBinary);
-    return NetCmd(ws, NetCmdType::OPEN, pack); 
+    return NetCmd(ws, NetCmdType::WRITE, pack); 
 }
 
 //////////////basic data type - end /////////////
@@ -175,6 +176,7 @@ std::shared_ptr<Helper> Helper::getInstance()
     std::lock_guard<std::mutex> guard(sInstanceMutex);
     if (!sInstance) {
         sInstance = std::make_shared<Helper>();
+        sInstance->init();
     }
     return sInstance;
 }
@@ -188,6 +190,8 @@ void Helper::init()
     netThread->on("connect", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
     netThread->on("send", [this](NetCmd &ev) {this->handleCmdWrite(ev); });
     netThread->on("close", [this](NetCmd& ev) {this->handleCmdDisconnect(ev); });
+
+    netThread->run();
 }
 
 void Helper::initProtocols()
@@ -241,19 +245,20 @@ void Helper::after()
 
 void Helper::handleCmdConnect(NetCmd &cmd)
 {
-    cmd.ws->connect();
+    cmd.ws->doConnect();
 }
 
 void Helper::handleCmdDisconnect(NetCmd &cmd)
 {
-    cmd.ws->disconnect();
+    cmd.ws->doDisconnect();
+    lws_callback_on_writable(cmd.ws->_wsi);
 }
 
 void Helper::handleCmdWrite(NetCmd &cmd)
 {
     auto pack = cmd.data;
     cmd.ws->_sendBuffer.push_back(pack);
-    lws_callback_on_writable(cmd.ws->lwsObj);
+    lws_callback_on_writable(cmd.ws->_wsi);
 }
 
 void Helper::updateLibUV()
@@ -267,67 +272,67 @@ void Helper::updateLibUV()
 
 ////////////////////net thread - end   ///////////////////
 
-int WebSocketImpl::protocolCounter = 1;
-std::atomic_int64_t WebSocketImpl::wsIdCounter = 1;
-std::unordered_map<int64_t, WebSocketImpl::Ptr > WebSocketImpl::cachedSocketes;
+int WebSocketImpl::_protocolCounter = 1;
+std::atomic_int64_t WebSocketImpl::_wsIdCounter = 1;
+std::unordered_map<int64_t, WebSocketImpl::Ptr > WebSocketImpl::_cachedSocketes;
 
 ///////friend function 
 static WebSocketImpl::Ptr findWs(int64_t wsId)
 {
-    auto it = WebSocketImpl::cachedSocketes.find(wsId);
-    return it == WebSocketImpl::cachedSocketes.end() ? nullptr : it->second;
+    auto it = WebSocketImpl::_cachedSocketes.find(wsId);
+    return it == WebSocketImpl::_cachedSocketes.end() ? nullptr : it->second;
 }
 
 WebSocketImpl::WebSocketImpl(WebSocket *t)
 {
-    ws = t;
-    wsId = wsIdCounter.fetch_add(1);
-    cachedSocketes.emplace(wsId, shared_from_this());
+    _ws = t;
+    _wsId = _wsIdCounter.fetch_add(1);
+    _cachedSocketes.emplace(_wsId, shared_from_this());
 }
 
 WebSocketImpl::~WebSocketImpl()
 {
-    cachedSocketes.erase(wsId);
+    _cachedSocketes.erase(_wsId);
 
-    if (lwsProtocols) {
-        free(lwsProtocols);
-        lwsProtocols = nullptr;
+    if (_lwsProtocols) {
+        free(_lwsProtocols);
+        _lwsProtocols = nullptr;
     }
-    if (lwsHost) {
+    if (_lwsHost) {
         //TODO destroy function not found!
-        lwsHost = nullptr;
+        _lwsHost = nullptr;
     }
-    if (lwsObj) {
+    if (_wsi) {
         //TODO destroy lws
-        lwsObj = nullptr;
+        _wsi = nullptr;
     }
 }
 
 bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string & caFile)
 {
-    this->uri = uri;
+    this->_uri = uri;
     this->_delegate = delegate;
-    this->protocols = protocols;
-    this->caFile = caFile;
+    this->_protocols = protocols;
+    this->_caFile = caFile;
 
-    if (this->uri.size())
+    if (this->_uri.size())
         return false;
 
     size_t size = protocols.size();
     if (size > 0) 
     {
-        lwsProtocols = (struct lws_protocols*)calloc(size + 1, sizeof(struct lws_protocols));
+        _lwsProtocols = (struct lws_protocols*)calloc(size + 1, sizeof(struct lws_protocols));
         for (int i = 0; i < size; i++) 
         {
-            struct lws_protocols *p = &lwsProtocols[i];
-            p->name = this->protocols[i].data();
-            p->id = (++protocolCounter);
+            struct lws_protocols *p = &_lwsProtocols[i];
+            p->name = this->_protocols[i].data();
+            p->id = (++_protocolCounter);
             p->rx_buffer_size = WS_RX_BUFFER_SIZE;
             p->per_session_data_size = 0;
             p->user = this;
             p->callback = (lws_callback_function*)&websocket_callback;
-            joinedProtocols += protocols[i];
-            if (i < size - 1) joinedProtocols += ",";
+            _joinedProtocols += protocols[i];
+            if (i < size - 1) _joinedProtocols += ",";
         }
     }
 
@@ -336,26 +341,33 @@ bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate
     return true;
 }
 
-void WebSocketImpl::close()
+void WebSocketImpl::sigClose()
 {
-    Helper::getInstance()->netThread->emit("close", NetCmd::Close(this));
-
+    NetCmd cmd = NetCmd::Close(this);
+    Helper::getInstance()->netThread->emit("close", cmd);
 }
 
-void WebSocketImpl::closeAsync()
+void WebSocketImpl::sigCloseAsync()
 {
-    Helper::getInstance()->netThread->emit("close", NetCmd::Close(this));
-
+    NetCmd cmd = NetCmd::Close(this);
+    Helper::getInstance()->netThread->emit("close", cmd);
+    //sleep forever
+    while (_state != WebSocket::State::CLOSED)
+    {
+        std::this_thread::yield();
+    }
 }
 
-void WebSocketImpl::send(const char *data, size_t len)
+void WebSocketImpl::sigSend(const char *data, size_t len)
 {
-    Helper::getInstance()->netThread->emit("send", NetCmd::Write(this, data, len, true));
+    NetCmd cmd = NetCmd::Write(this, data, len, true);
+    Helper::getInstance()->netThread->emit("send", cmd);
 }
 
-void WebSocketImpl::send(const std::string &msg)
+void WebSocketImpl::sigSend(const std::string &msg)
 {
-    Helper::getInstance()->netThread->emit("send", NetCmd::Write(this, msg.data(), msg.length, false));
+    NetCmd cmd = NetCmd::Write(this, msg.data(), msg.length(), false);
+    Helper::getInstance()->netThread->emit("send", cmd);
 }
 
 int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, ssize_t len)
@@ -364,19 +376,19 @@ int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason
     switch (reason)
     {
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
-        ret = onConnected();
+        ret = netOnConnected();
         break;
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-        ret = onError("lws_client_connection_error");
+        ret = netOnError(WebSocket::ErrorCode::CONNECTION_FAIURE);
         break;
     case LWS_CALLBACK_CLIENT_RECEIVE:
-        ret = onReadable(in, (size_t)len);
+        ret = netOnReadable(in, (size_t)len);
         break;
     case LWS_CALLBACK_CLIENT_WRITEABLE:
-        ret = onWritable();
+        ret = netOnWritable();
         break;
     case LWS_CALLBACK_WSI_DESTROY:
-        ret = onClosed();
+        ret = netOnClosed();
         break;
     case LWS_CALLBACK_PROTOCOL_INIT:
     case LWS_CALLBACK_PROTOCOL_DESTROY:
@@ -395,7 +407,7 @@ int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason
 }
 
 
-void WebSocketImpl::connect()
+void WebSocketImpl::doConnect()
 {
     struct lws_extension exts[] = {
         {
@@ -416,11 +428,11 @@ void WebSocketImpl::connect()
     lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
     info.port = CONTEXT_PORT_NO_LISTEN;
-    info.protocols = lwsProtocols == nullptr ? Helper::getInstance()->lwsDefaultProtocols : lwsProtocols;
+    info.protocols = _lwsProtocols == nullptr ? Helper::getInstance()->lwsDefaultProtocols : _lwsProtocols;
     info.gid = -1;
     info.uid = -1;
     info.user = this;
-    info.ssl_ca_filepath = caFile.c_str();
+    info.ssl_ca_filepath = _caFile.c_str();
 
     info.options = LWS_SERVER_OPTION_EXPLICIT_VHOSTS |
         LWS_SERVER_OPTION_LIBUV |
@@ -436,11 +448,11 @@ void WebSocketImpl::connect()
         sslFlags |= LCCSCF_USE_SSL;
     }
 
-    lwsHost = lws_create_vhost(Helper::getInstance()->lwsContext, &info);
+    _lwsHost = lws_create_vhost(Helper::getInstance()->lwsContext, &info);
 
     if (useSSL)
     {
-        lws_init_vhost_client_ssl(&info, lwsHost); //
+        lws_init_vhost_client_ssl(&info, _lwsHost); //
     }
 
 
@@ -453,21 +465,27 @@ void WebSocketImpl::connect()
     cinfo.path = "/";
     cinfo.host = "invoke.top";
     cinfo.origin = "invoke.top";
-    cinfo.protocol = joinedProtocols.empty() ? "" : joinedProtocols.c_str();
+    cinfo.protocol = _joinedProtocols.empty() ? "" : _joinedProtocols.c_str();
     cinfo.ietf_version_or_minus_one = -1;
     cinfo.userdata = this;
     cinfo.client_exts = exts;
-    cinfo.vhost = lwsHost;
+    cinfo.vhost = _lwsHost;
 
-    lwsObj = lws_client_connect_via_info(&cinfo);
+    _wsi = lws_client_connect_via_info(&cinfo);
 
-    if (lwsObj == nullptr)
-        onError("lws_client_connect_via_info() return nullptr");
+    if (_wsi == nullptr)
+        netOnError(WebSocket::ErrorCode::LWS_ERROR);
 
     Helper::getInstance()->updateLibUV();
 }
 
-void WebSocketImpl::write(NetDataPack &pack)
+void WebSocketImpl::doDisconnect()
+{
+    if (_state == WebSocket::State::CLOSED) return;
+    _state = WebSocket::State::CLOSING;
+}
+
+void WebSocketImpl::doWrite(NetDataPack &pack)
 {
     const size_t bufferSize = WS_RX_BUFFER_SIZE;
     const size_t frameSize = bufferSize > pack.remain() ? pack.remain() : bufferSize; //min
@@ -481,12 +499,12 @@ void WebSocketImpl::write(NetDataPack &pack)
     if (frameSize < pack.remain())
         writeProtocol |= LWS_WRITE_NO_FIN;
 
-    size_t bytesWrite = lws_write(lwsObj, pack.payload(), frameSize, (lws_write_protocol)writeProtocol);
+    size_t bytesWrite = lws_write(_wsi, pack.payload(), frameSize, (lws_write_protocol)writeProtocol);
 
     if (bytesWrite < 0)
     {
         //error 
-        closeAsync();
+        sigCloseAsync();
     }
     else if (bytesWrite < frameSize)
     {
@@ -494,41 +512,53 @@ void WebSocketImpl::write(NetDataPack &pack)
     }
 }
 
-int WebSocketImpl::onError(const std::string &msg)
+int WebSocketImpl::netOnError(WebSocket::ErrorCode ecode)
 {
-    std::cout << "connection error: " << msg << std::endl;
-    Helper::getInstance()->runInUI([this]() {
-        this->_delegate->onError(*(this->ws), -1); //FIXME error code
+    auto code = static_cast<int>(ecode);
+    std::cout << "connection error: " << code << std::endl;
+    Helper::getInstance()->runInUI([this, code]() {
+        this->_delegate->onError(*(this->_ws), static_cast<int>(code)); //FIXME error code
     });
+
+    //change state to CLOSED
+    netOnClosed();
+
     return 0;
 }
 
-int WebSocketImpl::onConnected()
+int WebSocketImpl::netOnConnected()
 {
     std::cout << "connected!" << std::endl; 
+    _state = WebSocket::State::OPEN;
     Helper::getInstance()->runInUI([this]() {
-        this->_delegate->onConnected(*(this->ws)); 
+        this->_delegate->onConnected(*(this->_ws)); 
     });
     return 0;
 }
 
-int WebSocketImpl::onClosed()
+int WebSocketImpl::netOnClosed()
 {
-    Helper::getInstance()->runInUI([this]() {
-        this->_delegate->onDisconnected(*(this->ws));
+    _state = WebSocket::State::CLOSED;
+    auto self = shared_from_this();
+    Helper::getInstance()->runInUI([self]() {
+        self->_delegate->onDisconnected(*(self->_ws));
     });
+
+    //remove from cache
+    WebSocketImpl::_cachedSocketes.erase(_wsId);
+
     return 0;
 }
 
-int WebSocketImpl::onReadable(void *in, size_t len)
+int WebSocketImpl::netOnReadable(void *in, size_t len)
 {
     std::cout << "readable : " << len << std::endl;
     if (in && len > 0) {
         _receiveBuffer.insert(_receiveBuffer.end(), (uint8_t*)in, (uint8_t*)in + len);
     }
     
-    auto remainSize = lws_remaining_packet_payload(lwsObj);
-    auto isFinalFrag = lws_is_final_fragment(lwsObj);
+    auto remainSize = lws_remaining_packet_payload(_wsi);
+    auto isFinalFrag = lws_is_final_fragment(_wsi);
 
     if (remainSize == 0 && isFinalFrag)
     {
@@ -536,21 +566,26 @@ int WebSocketImpl::onReadable(void *in, size_t len)
         
         _receiveBuffer.reserve(WS_REVERSED_RECEIVE_BUFFER_SIZE);
 
-        bool isBinary = (lws_frame_is_binary(lwsObj) != 0);
+        bool isBinary = (lws_frame_is_binary(_wsi) != 0);
 
         Helper::getInstance()->runInUI([rbuffCopy, this, isBinary]() {
-            WebSocket::Data data(rbuffCopy->data, rbuffCopy->size(), isBinary);
-            this->_delegate->onData(*(this->ws), data);
+            WebSocket::Data data((char*)(rbuffCopy->data()), rbuffCopy->size(), isBinary);
+            this->_delegate->onMesage(*(this->_ws), data);
         });
     }
     return 0;
 }
 
-int WebSocketImpl::onWritable()
+int WebSocketImpl::netOnWritable()
 {
     std::cout << "writable" << std::endl;
 
-    //TODO handle close
+    //handle close
+    if (_state == WebSocket::State::CLOSING)
+    {
+        lwsl_warn("closing websocket");
+        return -1;
+    }
 
     //pop sent packs
     while (_sendBuffer.size() > 0 && _sendBuffer.front()->remain() == 0)
@@ -562,12 +597,12 @@ int WebSocketImpl::onWritable()
     {
         auto &pack = _sendBuffer.front();
         if (pack->remain() > 0) {
-            write(*pack);
+            doWrite(*pack);
         }
     }
 
-    if (lwsObj && _sendBuffer.size() > 0)
-        lws_callback_on_writable(lwsObj);
+    if (_wsi && _sendBuffer.size() > 0)
+        lws_callback_on_writable(_wsi);
 
     return 0;
 }

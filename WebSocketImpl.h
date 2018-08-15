@@ -26,27 +26,28 @@ public:
     virtual ~WebSocketImpl();
 
     bool init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string &caFile);
-    void close();
-    void closeAsync();
-    void send(const char *data, size_t len);
-    void send(const std::string &msg);
+    void sigClose();
+    void sigCloseAsync();
+    void sigSend(const char *data, size_t len);
+    void sigSend(const std::string &msg);
 
     int lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void*, void*, ssize_t);
 
 private:
-    void _connect();
-    void _disconnect();    //callbacks
-    void _write(NetDataPack &pack);
+    void doConnect();
+    void doDisconnect();    //callbacks
+    void doWrite(NetDataPack &pack);
 
-    int onError(const std::string &);
-    int onConnected();
-    int onClosed();
-    int onReadable(void *, size_t len);
-    int onWritable();
+    int netOnError(WebSocket::ErrorCode code);
+    int netOnConnected();
+    int netOnClosed();
+    int netOnReadable(void *, size_t len);
+    int netOnWritable();
 
 public:
     WebSocketDelegate::Ptr _delegate;
     WebSocket *_ws = nullptr;
+    WebSocket::State _state;
 private:
     std::string _uri;
     std::string _caFile;

@@ -6,7 +6,7 @@
 #include <vector>
 #include <string>
 
-WebSocket::WebSocket() { impl = std::make_shared<WebSocketImpl>(); }
+WebSocket::WebSocket() { impl = std::make_shared<WebSocketImpl>(this); }
 WebSocket::~WebSocket() { impl.reset(); }
 
 bool WebSocket::init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string &caFile)
@@ -14,11 +14,11 @@ bool WebSocket::init(const std::string &uri, WebSocketDelegate::Ptr delegate, co
     return impl->init(uri, delegate, protocols, caFile);
 }
 
-void WebSocket::close() { impl->close(); }
+void WebSocket::close() { impl->sigClose(); }
 
-void WebSocket::send(const std::string &msg) { impl->send(msg); }
+void WebSocket::send(const std::string &msg) { impl->sigSend(msg); }
 
-void WebSocket::send(const char *data, size_t len) { impl->send(data, len); }
+void WebSocket::send(const char *data, size_t len) { impl->sigSend(data, len); }
 
 
 //////////////default delegate impl///////////////
@@ -39,7 +39,7 @@ void WebSocketDelegate::onError(WebSocket &ws, int errCode)
     std::cout << "Websocket " << "onError " << errCode << std::endl;
 }
 
-void WebSocketDelegate::onData(WebSocket &ws, const char *data, int len)
+void WebSocketDelegate::onMesage(WebSocket &ws, const WebSocket::Data &data)
 {
-    std::cout << "Websocket " << "recieve data" << len << " bytes !" << std::endl;
+    std::cout << "Websocket " << "recieve data" << data.len << " bytes !" << std::endl;
 }
