@@ -154,12 +154,14 @@ Helper::Helper()
 
 Helper::~Helper()
 {
+
     if (_netThread) {
         _netThread->syncStop(); //use async?
         _netThread.reset();
     }
     if (_lwsContext)
     {
+        lws_libuv_stop(_lwsContext);
         lws_context_destroy(_lwsContext);
         _lwsContext = nullptr;
     }
@@ -168,6 +170,8 @@ Helper::~Helper()
         free(_lwsDefaultProtocols);
         _lwsDefaultProtocols = nullptr;
     }
+
+
 }
 
 std::shared_ptr<Helper> Helper::getInstance()
@@ -182,7 +186,7 @@ std::shared_ptr<Helper> Helper::getInstance()
 
 void Helper::init()
 {
-    _netThread = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, shared_from_this(), 200);
+    _netThread = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, shared_from_this(), 5000);
 
     initProtocols();
     lws_context_creation_info  info = initCtxCreateInfo(_lwsDefaultProtocols, false);
@@ -242,7 +246,7 @@ void Helper::before()
 
 void Helper::update(int dtms)
 {
-   // std::cout << "[Helper] thread tick ... " << std::endl;
+    std::cout << "[Helper] thread tick ... " << std::endl;
 }
 
 void Helper::after()
@@ -446,20 +450,19 @@ void WebSocketImpl::doConnect()
     info.gid = -1;
     info.uid = -1;
     info.user = this;
-    info.ssl_ca_filepath = _caFile.c_str();
+    info.ssl_ca_filepath = _caFile.empty() ? nullptr : _caFile.c_str();
 
     info.options = LWS_SERVER_OPTION_EXPLICIT_VHOSTS |
-        LWS_SERVER_OPTION_LIBUV |
-        LWS_SERVER_OPTION_PEER_CERT_NOT_REQUIRED;
+        LWS_SERVER_OPTION_LIBUV;
     //ssl flags
-    int sslFlags = LCCSCF_ALLOW_SELFSIGNED |
-        LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK |
-        LCCSCF_ALLOW_EXPIRED;
+    int sslFlags = 0;
 
     if (useSSL)
     {
-        info.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-        sslFlags |= LCCSCF_USE_SSL;
+        info.options = info.options | LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT |
+            LWS_SERVER_OPTION_PEER_CERT_NOT_REQUIRED;
+        sslFlags = sslFlags | LCCSCF_USE_SSL | LCCSCF_ALLOW_SELFSIGNED |
+            LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK | LCCSCF_ALLOW_EXPIRED;
     }
 
     _lwsHost = lws_create_vhost(Helper::getInstance()->_lwsContext, &info);
@@ -544,8 +547,10 @@ int WebSocketImpl::netOnConnected()
 {
     std::cout << "connected!" << std::endl; 
     _state = WebSocket::State::OPEN;
-    Helper::getInstance()->runInUI([this]() {
+    auto wsi = this->_wsi;
+    Helper::getInstance()->runInUI([this, wsi]() {
         this->_delegate->onConnected(*(this->_ws)); 
+        lws_callback_on_writable(wsi);
     });
     return 0;
 }
