@@ -7,7 +7,7 @@
 #include <string>
 
 WebSocket::WebSocket() { impl = std::make_shared<WebSocketImpl>(this); }
-WebSocket::~WebSocket() { impl.reset(); }
+WebSocket::~WebSocket() { impl->sigClose(); impl.reset(); }
 
 bool WebSocket::init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string &caFile)
 {

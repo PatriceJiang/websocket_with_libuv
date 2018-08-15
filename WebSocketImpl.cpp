@@ -108,8 +108,9 @@ public:
     Helper();
     virtual ~Helper();
 
-    static std::shared_ptr<Helper> getInstance();
-    
+    static std::shared_ptr<Helper> fromCache();
+    static void dropCache();
+
     void init();
 
     void send(const std::string &event, const NetCmd &cmd);
@@ -132,8 +133,8 @@ private:
     lws_context_creation_info initCtxCreateInfo(const struct lws_protocols *protocols, bool useSSL);
 
 private:
-    static std::shared_ptr<Helper> __sInstance;
-    static std::mutex __sInstanceMutex;
+    static std::shared_ptr<Helper> __sCacheHelper;
+    static std::mutex __sCacheHelperMutex;
 
     std::shared_ptr<Looper<NetCmd> > _netThread = nullptr;
     
@@ -146,8 +147,8 @@ public:
 };
 
 //static fields
-std::shared_ptr<Helper> Helper::__sInstance;
-std::mutex Helper::__sInstanceMutex;
+std::shared_ptr<Helper> Helper::__sCacheHelper;
+std::mutex Helper::__sCacheHelperMutex;
 
 Helper::Helper()
 {}
@@ -174,14 +175,27 @@ Helper::~Helper()
 
 }
 
-std::shared_ptr<Helper> Helper::getInstance()
+std::shared_ptr<Helper> Helper::fromCache()
 {
-    std::lock_guard<std::mutex> guard(__sInstanceMutex);
-    if (!__sInstance) {
-        __sInstance = std::make_shared<Helper>();
-        __sInstance->init();
+    std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
+    if (!__sCacheHelper) 
+    {
+        __sCacheHelper = std::make_shared<Helper>();
+        __sCacheHelper->init();
     }
-    return __sInstance;
+    return __sCacheHelper;
+}
+
+void Helper::dropCache()
+{
+    std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
+    if (__sCacheHelper)
+    {
+        //FIXME: thread should stop itself
+        //      and this should invoke ~Helper
+        __sCacheHelper->_netThread->syncStop();
+        __sCacheHelper.reset();
+    }
 }
 
 void Helper::init()
@@ -268,7 +282,7 @@ void Helper::handleCmdConnect(NetCmd &cmd)
 void Helper::handleCmdDisconnect(NetCmd &cmd)
 {
     cmd.ws->doDisconnect();
-    lws_callback_on_writable(cmd.ws->_wsi);
+    //lws_callback_on_writable(cmd.ws->_wsi);
 }
 
 void Helper::handleCmdWrite(NetCmd &cmd)
@@ -280,7 +294,7 @@ void Helper::handleCmdWrite(NetCmd &cmd)
 
 void Helper::updateLibUV()
 {
-    lws_uv_initloop(Helper::getInstance()->_lwsContext, Helper::getInstance()->getUVLoop(), 0);
+    lws_uv_initloop(_lwsContext, getUVLoop(), 0);
 }
 
 
@@ -326,6 +340,7 @@ WebSocketImpl::~WebSocketImpl()
 
 bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string & caFile)
 {
+    _helper = Helper::fromCache();
     _cachedSocketes.emplace(_wsId, shared_from_this());
 
     this->_uri = uri;
@@ -354,19 +369,19 @@ bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate
         }
     }
 
-    Helper::getInstance()->send("open", NetCmd::Open(this));
+    _helper->send("open", NetCmd::Open(this));
 
     return true;
 }
 
 void WebSocketImpl::sigClose()
 {
-    Helper::getInstance()->send("close", NetCmd::Close(this));
+    _helper->send("close", NetCmd::Close(this));
 }
 
 void WebSocketImpl::sigCloseAsync()
 {
-    Helper::getInstance()->send("close", NetCmd::Close(this));
+    _helper->send("close", NetCmd::Close(this));
     //sleep forever
     while (_state != WebSocket::State::CLOSED)
     {
@@ -376,13 +391,13 @@ void WebSocketImpl::sigCloseAsync()
 
 void WebSocketImpl::sigSend(const char *data, size_t len)
 {
-    Helper::getInstance()->send("send", NetCmd::Write(this, data, len, true));
+    _helper->send("send", NetCmd::Write(this, data, len, true));
 }
 
 void WebSocketImpl::sigSend(const std::string &msg)
 {
     NetCmd cmd = NetCmd::Write(this, msg.data(), msg.length(), false);
-    Helper::getInstance()->send("send", cmd);
+    _helper->send("send", cmd);
 }
 
 int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, ssize_t len)
@@ -425,7 +440,7 @@ int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason
 void WebSocketImpl::doConnect()
 {
     
-    assert(Helper::getInstance()->getUVLoop());
+    assert(_helper->getUVLoop());
 
     struct lws_extension exts[] = {
         {
@@ -446,7 +461,7 @@ void WebSocketImpl::doConnect()
     lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
     info.port = CONTEXT_PORT_NO_LISTEN;
-    info.protocols = _lwsProtocols == nullptr ? Helper::getInstance()->_lwsDefaultProtocols : _lwsProtocols;
+    info.protocols = _lwsProtocols == nullptr ? _helper->_lwsDefaultProtocols : _lwsProtocols;
     info.gid = -1;
     info.uid = -1;
     info.user = this;
@@ -465,7 +480,7 @@ void WebSocketImpl::doConnect()
             LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK | LCCSCF_ALLOW_EXPIRED;
     }
 
-    _lwsHost = lws_create_vhost(Helper::getInstance()->_lwsContext, &info);
+    _lwsHost = lws_create_vhost(_helper->_lwsContext, &info);
 
     if (useSSL)
     {
@@ -475,7 +490,7 @@ void WebSocketImpl::doConnect()
 
     struct lws_client_connect_info cinfo;
     memset(&cinfo, 0, sizeof(cinfo));
-    cinfo.context = Helper::getInstance()->_lwsContext;
+    cinfo.context = _helper->_lwsContext;
     cinfo.address = "invoke.top";
     cinfo.port = 6789;
     cinfo.ssl_connection = sslFlags;
@@ -493,7 +508,7 @@ void WebSocketImpl::doConnect()
     if (_wsi == nullptr)
         netOnError(WebSocket::ErrorCode::LWS_ERROR);
 
-    Helper::getInstance()->updateLibUV();
+    _helper->updateLibUV();
 }
 
 void WebSocketImpl::doDisconnect()
@@ -533,7 +548,7 @@ int WebSocketImpl::netOnError(WebSocket::ErrorCode ecode)
 {
     auto code = static_cast<int>(ecode);
     std::cout << "connection error: " << code << std::endl;
-    Helper::getInstance()->runInUI([this, code]() {
+    _helper->runInUI([this, code]() {
         this->_delegate->onError(*(this->_ws), static_cast<int>(code)); //FIXME error code
     });
 
@@ -548,7 +563,7 @@ int WebSocketImpl::netOnConnected()
     std::cout << "connected!" << std::endl; 
     _state = WebSocket::State::OPEN;
     auto wsi = this->_wsi;
-    Helper::getInstance()->runInUI([this, wsi]() {
+    _helper->runInUI([this, wsi]() {
         this->_delegate->onConnected(*(this->_ws)); 
         lws_callback_on_writable(wsi);
     });
@@ -559,7 +574,7 @@ int WebSocketImpl::netOnClosed()
 {
     _state = WebSocket::State::CLOSED;
     auto self = shared_from_this();
-    Helper::getInstance()->runInUI([self]() {
+    _helper->runInUI([self]() {
         self->_delegate->onDisconnected(*(self->_ws));
     });
 
@@ -569,7 +584,7 @@ int WebSocketImpl::netOnClosed()
     if (_cachedSocketes.size() == 0)
     {
         //no active websocket, quit netThread
-        Helper::getInstance().reset(); 
+        Helper::dropCache();
     }
 
     return 0;
@@ -593,7 +608,7 @@ int WebSocketImpl::netOnReadable(void *in, size_t len)
 
         bool isBinary = (lws_frame_is_binary(_wsi) != 0);
 
-        Helper::getInstance()->runInUI([rbuffCopy, this, isBinary]() {
+        _helper->runInUI([rbuffCopy, this, isBinary]() {
             WebSocket::Data data((char*)(rbuffCopy->data()), rbuffCopy->size(), isBinary);
             this->_delegate->onMesage(*(this->_ws), data);
         });

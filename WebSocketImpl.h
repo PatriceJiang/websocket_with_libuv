@@ -11,6 +11,7 @@
 #include "WebSocket.h"
 
 class NetDataPack;
+class Helper;
 
 class WebSocketImpl : public std::enable_shared_from_this<WebSocketImpl> 
 {
@@ -48,6 +49,8 @@ public:
     WebSocketDelegate::Ptr _delegate;
     WebSocket *_ws = nullptr;
     WebSocket::State _state;
+    std::shared_ptr<Helper> _helper;
+
 private:
     std::string _uri;
     std::string _caFile;
