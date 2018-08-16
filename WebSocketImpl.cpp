@@ -236,7 +236,6 @@ void Helper::clear()
         //looper must be stopped before deletion of Helper::Loop, 
         //so 
         _looper->asyncStop(); //use async?
-                                 //_netThread.reset();
     }
     //delete helper after thread stop
     std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
@@ -363,6 +362,7 @@ WebSocketImpl::~WebSocketImpl()
     }
     if (_lwsHost) {
         //TODO destroy function not found!
+        lws_vhost_destroy(_lwsHost);
         _lwsHost = nullptr;
     }
     if (_wsi) {

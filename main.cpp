@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "WebSocket.h"
+#include "Looper.h"
 
 class WSDelegate : public WebSocketDelegate
 {
@@ -26,7 +27,7 @@ int main(int argc, char **argv)
 
     std::this_thread::sleep_for(std::chrono::seconds(5));
     //ws->close();
-    delete ws;
+    //delete ws;
     system("pause");
     return 0;
 }

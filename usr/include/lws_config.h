@@ -6,7 +6,7 @@
 	#endif
 #endif
 
-#define LWS_INSTALL_DATADIR "E:\INSTALL\WebSocket\win64/share"
+#define LWS_INSTALL_DATADIR "C:/Program Files (x86)/libwebsockets/share"
 
 /* Define to 1 to use wolfSSL/CyaSSL as a replacement for OpenSSL.
  * LWS_OPENSSL_SUPPORT needs to be set also for this to work. */
@@ -15,10 +15,10 @@
 /* Also define to 1 (in addition to USE_WOLFSSL) when using the
   (older) CyaSSL library */
 /* #undef USE_OLD_CYASSL */
-/* #undef LWS_USE_BORINGSSL */
+/* #undef LWS_WITH_BORINGSSL */
 
-/* #undef LWS_USE_MBEDTLS */
-/* #undef LWS_USE_POLARSSL */
+/* #undef LWS_WITH_MBEDTLS */
+/* #undef LWS_WITH_POLARSSL */
 /* #undef LWS_WITH_ESP8266 */
 /* #undef LWS_WITH_ESP32 */
 
@@ -26,16 +26,16 @@
 /* #undef LWS_WITH_NO_LOGS */
 
 /* The Libwebsocket version */
-#define LWS_LIBRARY_VERSION "2.2.2"
+#define LWS_LIBRARY_VERSION "2.4.2"
 
 #define LWS_LIBRARY_VERSION_MAJOR 2
-#define LWS_LIBRARY_VERSION_MINOR 2
+#define LWS_LIBRARY_VERSION_MINOR 4
 #define LWS_LIBRARY_VERSION_PATCH 2
 /* LWS_LIBRARY_VERSION_NUMBER looks like 1005001 for e.g. version 1.5.1 */
 #define LWS_LIBRARY_VERSION_NUMBER (LWS_LIBRARY_VERSION_MAJOR*1000000)+(LWS_LIBRARY_VERSION_MINOR*1000)+LWS_LIBRARY_VERSION_PATCH
 
 /* The current git commit hash that we're building from */
-#define LWS_BUILD_HASH "desktop-s54jiqa\\serveryjx@DESKTOP-S54JIQA-v2.0.0-360-gfff2bb5"
+#define LWS_BUILD_HASH "desktop-s54jiqa\\serveryjx@DESKTOP-S54JIQA-v2.0.0-640-g8964ce9d"
 
 /* Build with OpenSSL support */
 #define LWS_OPENSSL_SUPPORT
@@ -50,20 +50,22 @@
 /* #undef LWS_NO_EXTENSIONS */
 
 /* Enable libev io loop */
-/* #undef LWS_USE_LIBEV */
+/* #undef LWS_WITH_LIBEV */
 
 /* Enable libuv io loop */
-/* #undef LWS_USE_LIBUV */
-#define LWS_USE_LIBUV
+#define LWS_WITH_LIBUV
+
+/* Enable libevent io loop */
+/* #undef LWS_WITH_LIBEVENT */
 
 /* Build with support for ipv6 */
-/* #undef LWS_USE_IPV6 */
+/* #undef LWS_WITH_IPV6 */
 
 /* Build with support for UNIX domain socket */
-/* #undef LWS_USE_UNIX_SOCK */
+/* #undef LWS_WITH_UNIX_SOCK */
 
 /* Build with support for HTTP2 */
-/* #undef LWS_USE_HTTP2 */
+/* #undef LWS_WITH_HTTP2 */
 
 /* Turn on latency measuring code */
 /* #undef LWS_LATENCY */
@@ -90,6 +92,7 @@
 /* #undef LWS_SSL_SERVER_WITH_ECDH_CERT */
 /* #undef LWS_HAVE_SSL_CTX_set1_param */
 /* #undef LWS_HAVE_X509_VERIFY_PARAM_set1_host */
+/* #undef LWS_HAVE_RSA_SET0_KEY */
 
 /* #undef LWS_HAVE_UV_VERSION_H */
 
@@ -110,6 +113,7 @@
 /* #undef LWS_WITH_SERVER_STATUS */
 
 /* #undef LWS_WITH_STATEFUL_URLDECODE */
+/* #undef LWS_WITH_PEER_LIMITS */
 
 /* Maximum supported service threads */
 #define LWS_MAX_SMP 1
@@ -127,11 +131,26 @@
 #define LWS_WITH_ZIP_FOPS
 #define LWS_HAVE_STDINT_H
 
+/* #undef LWS_AVOID_SIGPIPE_IGN */
+
 /* #undef LWS_FALLBACK_GETHOSTBYNAME */
+
+/* #undef LWS_WITH_STATS */
+/* #undef LWS_WITH_SOCKS5 */
+
+/* #undef LWS_HAVE_SYS_CAPABILITY_H */
+/* #undef LWS_HAVE_LIBCAP */
+
+#define LWS_HAVE_ATOLL
+#define LWS_HAVE__ATOI64
+#define LWS_HAVE__STAT32I64
 
 /* OpenSSL various APIs */
 
 /* #undef LWS_HAVE_TLS_CLIENT_METHOD */
 /* #undef LWS_HAVE_TLSV1_2_CLIENT_METHOD */
+/* #undef LWS_HAVE_SSL_SET_INFO_CALLBACK */
+
+#define LWS_HAS_INTPTR_T
 
 
