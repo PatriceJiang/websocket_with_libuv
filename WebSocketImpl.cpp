@@ -11,6 +11,16 @@
 #define WS_REVERSED_RECEIVE_BUFFER_SIZE  (1 << 12)
 
 
+enum CallbackInvoke {
+    CallbackInvoke_CONNECTED = 1 << 0,
+    CallbackInvoke_CLOSED = 1 << 1,
+    CallbackInvoke_ERROR = 1 << 2
+};
+
+#define CHECK_INVOKE_FLAG(flg)  do { \
+    if(_callbackInvokeFlags & flg)  return 0; \
+    _callbackInvokeFlags |= flg; } while(0)
+
 ////////////////////net thread - begin ///////////////////
 
 //////////////basic data type - begin /////////////
@@ -108,8 +118,8 @@ public:
     Helper();
     virtual ~Helper();
 
-    static std::shared_ptr<Helper> fromCache();
-    static void dropCache();
+    static std::shared_ptr<Helper> fetch();
+    static void drop();
 
     void init();
 
@@ -127,6 +137,7 @@ public:
 
     uv_loop_t * getUVLoop() { return _netThread->getUVLoop(); }
     void updateLibUV();
+
 private:
     //libwebsocket helper
     void initProtocols();
@@ -135,15 +146,12 @@ private:
 private:
     static std::shared_ptr<Helper> __sCacheHelper;
     static std::mutex __sCacheHelperMutex;
-
     std::shared_ptr<Looper<NetCmd> > _netThread = nullptr;
     
 public:
     //libwebsocket fields
     lws_protocols * _lwsDefaultProtocols = nullptr;
     lws_context *_lwsContext = nullptr;
-
-    //friend class WebSocketImpl;
 };
 
 //static fields
@@ -156,26 +164,12 @@ Helper::Helper()
 Helper::~Helper()
 {
 
-    if (_netThread) {
-        _netThread->syncStop(); //use async?
-        _netThread.reset();
-    }
-    if (_lwsContext)
-    {
-        lws_libuv_stop(_lwsContext);
-        lws_context_destroy(_lwsContext);
-        _lwsContext = nullptr;
-    }
-    if (_lwsDefaultProtocols)
-    {
-        free(_lwsDefaultProtocols);
-        _lwsDefaultProtocols = nullptr;
-    }
+
 
 
 }
 
-std::shared_ptr<Helper> Helper::fromCache()
+std::shared_ptr<Helper> Helper::fetch()
 {
     std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
     if (!__sCacheHelper) 
@@ -186,22 +180,19 @@ std::shared_ptr<Helper> Helper::fromCache()
     return __sCacheHelper;
 }
 
-void Helper::dropCache()
+void Helper::drop()
 {
+    // drop ~ _netThread#stop  ~ Helper::after() ~ reset() ~ Helper::~Helper
     std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
     if (__sCacheHelper)
-    {
-        //FIXME: thread should stop itself
-        //      and this should invoke ~Helper
-        __sCacheHelper->_netThread->syncStop();
-        __sCacheHelper.reset();
-    }
+        __sCacheHelper->_netThread->asyncStop();
+    
 }
 
 void Helper::init()
 {
-    _netThread = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, shared_from_this(), 5000);
-
+    _netThread = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, this, 5000);
+    
     initProtocols();
     lws_context_creation_info  info = initCtxCreateInfo(_lwsDefaultProtocols, false);
     _lwsContext = lws_create_context(&info);
@@ -266,6 +257,28 @@ void Helper::update(int dtms)
 void Helper::after()
 {
     std::cout << "[Helper] thread quit!!! ... " << std::endl;
+
+    if (_lwsContext)
+    {
+        lws_libuv_stop(_lwsContext);
+        lws_context_destroy(_lwsContext);
+        _lwsContext = nullptr;
+    }
+    if (_lwsDefaultProtocols)
+    {
+        free(_lwsDefaultProtocols);
+        _lwsDefaultProtocols = nullptr;
+    }
+    if (_netThread) {
+        //looper must be stopped before deletion of Helper::Loop, 
+        //so 
+        _netThread->syncStop(); //use async?
+        //_netThread.reset();
+    }
+    //delete helper after thread stop
+    std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
+    if (__sCacheHelper) __sCacheHelper.reset();
+    
 }
 
 void Helper::runInUI(const std::function<void()> &fn)
@@ -322,7 +335,7 @@ WebSocketImpl::WebSocketImpl(WebSocket *t)
 
 WebSocketImpl::~WebSocketImpl()
 {
-    _cachedSocketes.erase(_wsId);
+    _cachedSocketes.erase(_wsId); //redundancy
 
     if (_lwsProtocols) {
         free(_lwsProtocols);
@@ -340,15 +353,16 @@ WebSocketImpl::~WebSocketImpl()
 
 bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string & caFile)
 {
-    _helper = Helper::fromCache();
+    _helper = Helper::fetch();
     _cachedSocketes.emplace(_wsId, shared_from_this());
 
-    this->_uri = uri;
-    this->_delegate = delegate;
-    this->_protocols = protocols;
-    this->_caFile = caFile;
+    _uri = uri;
+    _delegate = delegate;
+    _protocols = protocols;
+    _caFile = caFile;
+    _callbackInvokeFlags = 0;
 
-    if (this->_uri.size())
+    if (_uri.size())
         return false;
 
     size_t size = protocols.size();
@@ -358,7 +372,7 @@ bool WebSocketImpl::init(const std::string &uri, WebSocketDelegate::Ptr delegate
         for (int i = 0; i < size; i++) 
         {
             struct lws_protocols *p = &_lwsProtocols[i];
-            p->name = this->_protocols[i].data();
+            p->name = _protocols[i].data();
             p->id = (++_protocolCounter);
             p->rx_buffer_size = WS_RX_BUFFER_SIZE;
             p->per_session_data_size = 0;
@@ -546,6 +560,8 @@ void WebSocketImpl::doWrite(NetDataPack &pack)
 
 int WebSocketImpl::netOnError(WebSocket::ErrorCode ecode)
 {
+    CHECK_INVOKE_FLAG(CallbackInvoke_ERROR);
+
     auto code = static_cast<int>(ecode);
     std::cout << "connection error: " << code << std::endl;
     _helper->runInUI([this, code]() {
@@ -560,6 +576,7 @@ int WebSocketImpl::netOnError(WebSocket::ErrorCode ecode)
 
 int WebSocketImpl::netOnConnected()
 {
+    CHECK_INVOKE_FLAG(CallbackInvoke_CONNECTED);
     std::cout << "connected!" << std::endl; 
     _state = WebSocket::State::OPEN;
     auto wsi = this->_wsi;
@@ -572,19 +589,21 @@ int WebSocketImpl::netOnConnected()
 
 int WebSocketImpl::netOnClosed()
 {
+    CHECK_INVOKE_FLAG(CallbackInvoke_CLOSED);
     _state = WebSocket::State::CLOSED;
     auto self = shared_from_this();
-    _helper->runInUI([self]() {
+    auto wsid = _wsId;
+    _helper->runInUI([self,wsid]() {
+        //remove from cache in UI thread, since it's added in main thread
+        _cachedSocketes.erase(wsid);
         self->_delegate->onDisconnected(*(self->_ws));
     });
 
-    //remove from cache
-    _cachedSocketes.erase(_wsId);
 
     if (_cachedSocketes.size() == 0)
     {
         //no active websocket, quit netThread
-        Helper::dropCache();
+        Helper::drop();
     }
 
     return 0;
