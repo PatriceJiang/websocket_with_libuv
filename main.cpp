@@ -76,7 +76,7 @@ int main(int argc, char **argv)
     Ticker * ticker = new Ticker(ws);
     strLooper = std::make_shared<LooperString>(ticker, 2000);
 
-    ws->init("", std::make_shared<WSDelegate>(), std::vector<std::string>(), "");
+    ws->init("", std::make_shared<WSDelegate>(), std::vector<std::string>(), "E:\\Projects\\uv2_cmake\\cacert.pem");
     
     std::this_thread::sleep_for(std::chrono::seconds(5));
     
