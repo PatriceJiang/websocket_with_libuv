@@ -11,6 +11,9 @@
 #include "WebSocket.h"
 #include "Looper.h"
 
+using namespace cocos2d::loop;
+using namespace cocos2d::net;
+
 typedef Looper<std::string> LooperString;
 LooperString::Ptr strLooper;
 

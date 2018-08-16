@@ -447,7 +447,7 @@ static const CERT_CONTEXT * cryptoapi_find_cert(const char *name, DWORD store)
 	if (cs == NULL) {
 		cryptoapi_error("Failed to open 'My system store'");
 		return NULL;
-	}
+	}c
 
 	if (strncmp(name, "cert://", 7) == 0) {
 		unsigned short wbuf[255];

@@ -10,61 +10,67 @@
 
 #include "WebSocket.h"
 
-class NetDataPack;
-class Helper;
-
-class WebSocketImpl : public std::enable_shared_from_this<WebSocketImpl> 
+namespace cocos2d
 {
-private:
-    static int _protocolCounter;
-    static std::atomic_int64_t _wsIdCounter;
-public:
-    typedef std::shared_ptr<WebSocketImpl> Ptr;
+    namespace net
+    {
+        class NetDataPack;
+        class Helper;
 
-    static std::unordered_map<int64_t, Ptr > _cachedSocketes;
+        class WebSocketImpl : public std::enable_shared_from_this<WebSocketImpl>
+        {
+        private:
+            static int _protocolCounter;
+            static std::atomic_int64_t _wsIdCounter;
+        public:
+            typedef std::shared_ptr<WebSocketImpl> Ptr;
 
-    WebSocketImpl(WebSocket *);
-    virtual ~WebSocketImpl();
+            static std::unordered_map<int64_t, Ptr > _cachedSocketes;
 
-    bool init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string &caFile);
-    void sigClose();
-    void sigCloseAsync();
-    void sigSend(const char *data, size_t len);
-    void sigSend(const std::string &msg);
+            WebSocketImpl(WebSocket *);
+            virtual ~WebSocketImpl();
 
-    int lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void*, void*, ssize_t);
+            bool init(const std::string &uri, WebSocketDelegate::Ptr delegate, const std::vector<std::string> &protocols, const std::string &caFile);
+            void sigClose();
+            void sigCloseAsync();
+            void sigSend(const char *data, size_t len);
+            void sigSend(const std::string &msg);
 
-private:
-    void doConnect();
-    void doDisconnect();    //callbacks
-    void doWrite(NetDataPack &pack);
+            int lwsCallback(struct lws *wsi, enum lws_callback_reasons reason, void*, void*, ssize_t);
 
-    int netOnError(WebSocket::ErrorCode code);
-    int netOnConnected();
-    int netOnClosed();
-    int netOnReadable(void *, size_t len);
-    int netOnWritable();
+        private:
+            void doConnect();
+            void doDisconnect();    //callbacks
+            void doWrite(NetDataPack &pack);
 
-public:
-    WebSocketDelegate::Ptr _delegate;
-    WebSocket *_ws = nullptr;
-    WebSocket::State _state;
-    std::shared_ptr<Helper> _helper;
+            int netOnError(WebSocket::ErrorCode code);
+            int netOnConnected();
+            int netOnClosed();
+            int netOnReadable(void *, size_t len);
+            int netOnWritable();
 
-private:
-    std::string _uri;
-    std::string _caFile;
-    std::vector<std::string> _protocols;
-    std::string _joinedProtocols = "";
-    std::vector<uint8_t> _receiveBuffer;
-    //libwebsocket fiels
-    lws *_wsi = nullptr;
-    lws_vhost *_lwsHost = nullptr;
-    lws_protocols *_lwsProtocols = nullptr;
-    int64_t _wsId;
-    std::list<std::shared_ptr<NetDataPack>> _sendBuffer;
+        public:
+            WebSocketDelegate::Ptr _delegate;
+            WebSocket *_ws = nullptr;
+            WebSocket::State _state;
+            std::shared_ptr<Helper> _helper;
 
-    int32_t _callbackInvokeFlags = 0;
+        private:
+            std::string _uri;
+            std::string _caFile;
+            std::vector<std::string> _protocols;
+            std::string _joinedProtocols = "";
+            std::vector<uint8_t> _receiveBuffer;
+            //libwebsocket fiels
+            lws *_wsi = nullptr;
+            lws_vhost *_lwsHost = nullptr;
+            lws_protocols *_lwsProtocols = nullptr;
+            int64_t _wsId;
+            std::list<std::shared_ptr<NetDataPack>> _sendBuffer;
 
-    friend class Helper;
-};
+            int32_t _callbackInvokeFlags = 0;
+
+            friend class Helper;
+        };
+    }
+}
