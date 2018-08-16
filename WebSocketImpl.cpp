@@ -454,6 +454,11 @@ int WebSocketImpl::lwsCallback(struct lws *wsi, enum lws_callback_reasons reason
     case LWS_CALLBACK_WSI_DESTROY:
         ret = netOnClosed();
         break;
+    case LWS_CALLBACK_CHANGE_MODE_POLL_FD:
+    case LWS_CALLBACK_LOCK_POLL:
+    case LWS_CALLBACK_UNLOCK_POLL:
+        //ignore case
+        break;
     case LWS_CALLBACK_PROTOCOL_INIT:
     case LWS_CALLBACK_PROTOCOL_DESTROY:
     case LWS_CALLBACK_WSI_CREATE:

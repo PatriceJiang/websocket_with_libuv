@@ -43,5 +43,5 @@ void WebSocketDelegate::onError(WebSocket &ws, int errCode)
 
 void WebSocketDelegate::onMesage(WebSocket &ws, const WebSocket::Data &data)
 {
-    std::cout << "Websocket " << "recieve data" << data.len << " bytes !" << std::endl;
+    std::cout << "Websocket " << "recieve data " << data.len << " bytes !" << std::endl;
 }
