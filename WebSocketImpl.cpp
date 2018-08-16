@@ -497,6 +497,12 @@ void WebSocketImpl::doConnect()
 
     auto useSSL = true; //TODO calculate from url
 
+    if (useSSL) {
+        //caFile must be provided once ssl is enabled.
+        //it can be downloaded from sites such as https://curl.haxx.se/docs/caextract.html
+        assert(_caFile.length() > 0);
+    }
+
     lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
     info.port = CONTEXT_PORT_NO_LISTEN;
