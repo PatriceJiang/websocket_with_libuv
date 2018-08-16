@@ -209,7 +209,7 @@ void Helper::init()
     _looper = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, _loop, 5000);
     
     initProtocols();
-    lws_context_creation_info  info = initCtxCreateInfo(_lwsDefaultProtocols, false);
+    lws_context_creation_info  info = initCtxCreateInfo(_lwsDefaultProtocols, true);
     _lwsContext = lws_create_context(&info);
 
     _looper->on("open", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
@@ -495,7 +495,7 @@ void WebSocketImpl::doConnect()
     { nullptr,nullptr,nullptr }
     };
 
-    auto useSSL = false; //TODO calculate from url
+    auto useSSL = true; //TODO calculate from url
 
     lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
