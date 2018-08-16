@@ -63,6 +63,7 @@ private:
     lws_protocols *_lwsProtocols = nullptr;
     int64_t _wsId;
     std::list<std::shared_ptr<NetDataPack>> _sendBuffer;
+
     int32_t _callbackInvokeFlags = 0;
 
     friend class Helper;

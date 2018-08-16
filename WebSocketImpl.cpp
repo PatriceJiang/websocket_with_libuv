@@ -110,8 +110,9 @@ static int websocket_callback(lws *wsi, enum lws_callback_reasons reason, void *
 
 /////////////loop thread - begin /////////////////
 
+class HelperLoop;
 
-class Helper :public Loop, public std::enable_shared_from_this<Helper>
+class Helper
 {
 public:
 
@@ -122,12 +123,9 @@ public:
     static void drop();
 
     void init();
+    void clear();
 
     void send(const std::string &event, const NetCmd &cmd);
-
-    void before() override;
-    void after() override;
-    void update(int dtms) override;
 
     void runInUI(const std::function<void()> &fn);
 
@@ -135,7 +133,7 @@ public:
     void handleCmdDisconnect(NetCmd &cmd);
     void handleCmdWrite(NetCmd &cmd);
 
-    uv_loop_t * getUVLoop() { return _netThread->getUVLoop(); }
+    uv_loop_t * getUVLoop() { return _looper->getUVLoop(); }
     void updateLibUV();
 
 private:
@@ -146,12 +144,26 @@ private:
 private:
     static std::shared_ptr<Helper> __sCacheHelper;
     static std::mutex __sCacheHelperMutex;
-    std::shared_ptr<Looper<NetCmd> > _netThread = nullptr;
+    
+    std::shared_ptr<Looper<NetCmd> > _looper = nullptr;
+    HelperLoop *_loop = nullptr;
     
 public:
     //libwebsocket fields
     lws_protocols * _lwsDefaultProtocols = nullptr;
     lws_context *_lwsContext = nullptr;
+
+    friend class HelperLoop;
+};
+
+class HelperLoop : public Loop {
+public:
+    HelperLoop(Helper *helper) :_helper(helper) {}
+    void before() override;
+    void after() override;
+    void update(int dtms) override;
+private:
+    Helper * _helper;
 };
 
 //static fields
@@ -163,10 +175,11 @@ Helper::Helper()
 
 Helper::~Helper()
 {
-
-
-
-
+    if (_loop)
+    {
+        delete _loop;
+        _loop = nullptr;
+    }
 }
 
 std::shared_ptr<Helper> Helper::fetch()
@@ -185,23 +198,49 @@ void Helper::drop()
     // drop ~ _netThread#stop  ~ Helper::after() ~ reset() ~ Helper::~Helper
     std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
     if (__sCacheHelper)
-        __sCacheHelper->_netThread->asyncStop();
+        __sCacheHelper->_looper->asyncStop();
     
 }
 
 void Helper::init()
 {
-    _netThread = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, this, 5000);
+    _loop = new HelperLoop(this);
+
+    _looper = std::make_shared<Looper<NetCmd> >(ThreadCategory::NET_THREAD, _loop, 5000);
     
     initProtocols();
     lws_context_creation_info  info = initCtxCreateInfo(_lwsDefaultProtocols, false);
     _lwsContext = lws_create_context(&info);
 
-    _netThread->on("open", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
-    _netThread->on("send", [this](NetCmd &ev) {this->handleCmdWrite(ev); });
-    _netThread->on("close", [this](NetCmd& ev) {this->handleCmdDisconnect(ev); });
+    _looper->on("open", [this](NetCmd &ev) {this->handleCmdConnect(ev); });
+    _looper->on("send", [this](NetCmd &ev) {this->handleCmdWrite(ev); });
+    _looper->on("close", [this](NetCmd& ev) {this->handleCmdDisconnect(ev); });
 
-    _netThread->run();
+    _looper->run();
+}
+
+void Helper::clear()
+{
+    if (_lwsContext)
+    {
+        lws_libuv_stop(_lwsContext);
+        lws_context_destroy(_lwsContext);
+        _lwsContext = nullptr;
+    }
+    if (_lwsDefaultProtocols)
+    {
+        free(_lwsDefaultProtocols);
+        _lwsDefaultProtocols = nullptr;
+    }
+    if (_looper) {
+        //looper must be stopped before deletion of Helper::Loop, 
+        //so 
+        _looper->asyncStop(); //use async?
+                                 //_netThread.reset();
+    }
+    //delete helper after thread stop
+    std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
+    if (__sCacheHelper) __sCacheHelper.reset();
 }
 
 void Helper::initProtocols()
@@ -240,46 +279,9 @@ lws_context_creation_info Helper::initCtxCreateInfo(const struct lws_protocols *
 void Helper::send(const std::string &event, const NetCmd &cmd)
 {
     NetCmd _copy(cmd);
-    _netThread->emit(event, _copy);
+    _looper->emit(event, _copy);
 }
 
-void Helper::before()
-{
-    std::cout << "[Helper] thread start ... " << std::endl;
-    updateLibUV();
-}
-
-void Helper::update(int dtms)
-{
-    std::cout << "[Helper] thread tick ... " << std::endl;
-}
-
-void Helper::after()
-{
-    std::cout << "[Helper] thread quit!!! ... " << std::endl;
-
-    if (_lwsContext)
-    {
-        lws_libuv_stop(_lwsContext);
-        lws_context_destroy(_lwsContext);
-        _lwsContext = nullptr;
-    }
-    if (_lwsDefaultProtocols)
-    {
-        free(_lwsDefaultProtocols);
-        _lwsDefaultProtocols = nullptr;
-    }
-    if (_netThread) {
-        //looper must be stopped before deletion of Helper::Loop, 
-        //so 
-        _netThread->syncStop(); //use async?
-        //_netThread.reset();
-    }
-    //delete helper after thread stop
-    std::lock_guard<std::mutex> guard(__sCacheHelperMutex);
-    if (__sCacheHelper) __sCacheHelper.reset();
-    
-}
 
 void Helper::runInUI(const std::function<void()> &fn)
 {
@@ -310,6 +312,24 @@ void Helper::updateLibUV()
     lws_uv_initloop(_lwsContext, getUVLoop(), 0);
 }
 
+
+
+void HelperLoop::before()
+{
+    std::cout << "[HelperLoop] thread start ... " << std::endl;
+    _helper->updateLibUV();
+}
+
+void HelperLoop::update(int dtms)
+{
+    std::cout << "[HelperLoop] thread tick ... " << std::endl;
+}
+
+void HelperLoop::after()
+{
+    std::cout << "[HelperLoop] thread quit!!! ... " << std::endl;
+    _helper->clear();
+}
 
 /////////////loop thread - end //////////////////
 
@@ -569,7 +589,7 @@ int WebSocketImpl::netOnError(WebSocket::ErrorCode ecode)
     });
 
     //change state to CLOSED
-    netOnClosed();
+    //netOnClosed();
 
     return 0;
 }
