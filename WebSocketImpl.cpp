@@ -20,7 +20,7 @@ using namespace cocos2d::loop;
 
 namespace cocos2d
 {
-    namespace net
+    namespace network
     {
 
         enum CallbackInvoke {
@@ -508,7 +508,7 @@ namespace cocos2d
 
             if (useSSL) {
                 //caFile must be provided once ssl is enabled.
-                //it can be downloaded from sites such as https://curl.haxx.se/docs/caextract.html
+                //it can be downloaded from site https://curl.haxx.se/docs/caextract.html
                 assert(_caFile.length() > 0);
             }
 

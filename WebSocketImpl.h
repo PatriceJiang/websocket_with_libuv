@@ -12,7 +12,7 @@
 
 namespace cocos2d
 {
-    namespace net
+    namespace network
     {
         class NetDataPack;
         class Helper;

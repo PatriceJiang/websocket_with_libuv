@@ -6,7 +6,7 @@
 
 namespace cocos2d
 {
-    namespace net
+    namespace network
     {
         class WebSocketDelegate;
         class WebSocketImpl;

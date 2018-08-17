@@ -8,7 +8,7 @@
 
 namespace cocos2d
 {
-    namespace net
+    namespace network
     {
         WebSocket::WebSocket() { impl = std::make_shared<WebSocketImpl>(this); }
         WebSocket::~WebSocket() { impl->sigClose(); impl.reset(); }
